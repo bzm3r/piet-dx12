@@ -297,9 +297,6 @@ inline uint PietItem_tag(ByteAddressBuffer buf, PietItemRef ref) {
 inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {
     uint4 group0 = src.Load4(src_ref);
     dst.Store4(dst_ref, group0);
-
-    uint2 group1 = src.Load2(src_ref + 16);
-    dst.Store2(dst_ref + 16, group1);
 }
 
 #define BBOX_SIZE 8

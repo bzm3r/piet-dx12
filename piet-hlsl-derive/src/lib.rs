@@ -143,14 +143,14 @@ fn generate_hlsl_value_extractor(size_in_bits: u32) -> String {
         "inline uint extract_{}bit_value(uint bit_shift, uint package) {{\n",
         size_in_bits
     )
-    .unwrap();
+        .unwrap();
     write!(extractor, "    uint mask = {};\n", mask_width).unwrap();
     write!(
         extractor,
         "{}",
         "    uint result = (package >> bit_shift) & mask;\n\n    return result;\n}\n\n"
     )
-    .unwrap();
+        .unwrap();
 
     extractor
 }
@@ -212,14 +212,14 @@ impl StoredField {
                         "inline uint {}_unpack_{}(uint {}) {{\n    {} result;\n\n",
                         packed_struct_name, self.name, packed_field_name, hlsl_typename,
                     )
-                    .unwrap();
+                        .unwrap();
 
                     write!(
                         unpacker,
                         "    result = extract_{}bit_value({}, {});\n",
                         size_in_bits, self.offset, packed_field_name
                     )
-                    .unwrap();
+                        .unwrap();
                 }
                 GpuType::Vector(scalar, unpacked_size) => {
                     let scalar_size_in_bits = 8 * scalar.size();
@@ -242,7 +242,7 @@ impl StoredField {
                         hlsl_typename,
                         unpacked_size,
                     )
-                    .unwrap();
+                        .unwrap();
 
                     for i in 0..unpacked_size {
                         write!(
@@ -253,7 +253,7 @@ impl StoredField {
                             32 - (i + 1) * scalar_size_in_bits,
                             packed_field_name
                         )
-                        .unwrap();
+                            .unwrap();
                     }
                 }
                 _ => panic!(
@@ -471,7 +471,7 @@ impl PackedField {
                         self.name,
                         ref_type,
                     )
-                    .unwrap();
+                        .unwrap();
                 }
                 _ => {
                     write!(
@@ -482,7 +482,7 @@ impl PackedField {
                         self.name,
                         ref_type,
                     )
-                    .unwrap();
+                        .unwrap();
                 }
             }
             write!(field_accessor, "{}", reader).unwrap();
@@ -503,7 +503,7 @@ impl PackedField {
                 "{}",
                 sf.generate_hlsl_unpacker(packed_struct_name, &self.name)
             )
-            .unwrap();
+                .unwrap();
         }
 
         unpackers
@@ -564,7 +564,7 @@ impl PackedStruct {
             "inline {} {}_read(ByteAddressBuffer buf, {} ref) {{\n",
             self.name, self.name, ref_type,
         )
-        .unwrap();
+            .unwrap();
         write!(r, "    {} result;\n\n", self.name).unwrap();
 
         let mut current_offset: usize = 0;
@@ -588,7 +588,7 @@ impl PackedStruct {
                 "    result.{} = {};\n\n",
                 packed_field.name, packed_field.name
             )
-            .unwrap();
+                .unwrap();
 
             current_offset += packed_field.size(module).unwrap();
         }
@@ -632,7 +632,7 @@ impl PackedStruct {
                     packed_field.name
                 ),
             }
-            .unwrap()
+                .unwrap()
         }
         write!(r, "{}", "};\n\n").unwrap();
 
@@ -682,7 +682,7 @@ impl SpecifiedStruct {
             "inline {} {}_unpack({} packed_form) {{\n",
             self.name, self.packed_form.name, self.packed_form.name,
         )
-        .unwrap();
+            .unwrap();
 
         write!(r, "    {} result;\n\n", self.name).unwrap();
         for (field_name, field_type) in self.fields.iter() {
@@ -707,7 +707,7 @@ impl SpecifiedStruct {
                         "    result.{} = {}Packed_unpack(packed_form.{});\n",
                         field_name, name, packed_field.name
                     )
-                    .unwrap();
+                        .unwrap();
                 }
                 _ => {
                     write!(
@@ -715,7 +715,7 @@ impl SpecifiedStruct {
                         "    result.{} = {}_unpack_{}(packed_form.{});\n",
                         field_name, self.packed_form.name, field_name, packed_field.name
                     )
-                    .unwrap();
+                        .unwrap();
                 }
             }
         }
@@ -821,9 +821,9 @@ impl GpuType {
         }
         match ty {
             syn::Type::Path(TypePath {
-                path: syn::Path { segments, .. },
-                ..
-            }) => {
+                                path: syn::Path { segments, .. },
+                                ..
+                            }) => {
                 if segments.len() == 1 {
                     let seg = &segments[0];
                     if seg.ident == "Ref" {
@@ -860,10 +860,10 @@ impl GpuTypeDef {
     fn from_syn(item: &syn::Item) -> Result<Self, String> {
         match item {
             syn::Item::Struct(ItemStruct {
-                ident,
-                fields: Fields::Named(FieldsNamed { named, .. }),
-                ..
-            }) => {
+                                  ident,
+                                  fields: Fields::Named(FieldsNamed { named, .. }),
+                                  ..
+                              }) => {
                 let mut fields = Vec::new();
                 for field in named {
                     let field_ty = GpuType::from_syn(&field.ty)?;
@@ -873,8 +873,8 @@ impl GpuTypeDef {
                 Ok(GpuTypeDef::Struct(ident.to_string(), fields))
             }
             syn::Item::Enum(ItemEnum {
-                ident, variants, ..
-            }) => {
+                                ident, variants, ..
+                            }) => {
                 let mut v = Vec::new();
                 for variant in variants {
                     let vname = variant.ident.to_string();
@@ -988,13 +988,13 @@ impl GpuTypeDef {
                     "{}Packed {}_read(const device char *buf, {} ref) {{\n",
                     name, name, rn
                 )
-                .unwrap();
+                    .unwrap();
                 write!(
                     r,
                     "    return *((const device {}Packed *)(buf + ref));\n",
                     name
                 )
-                .unwrap();
+                    .unwrap();
                 write!(r, "}}\n").unwrap();
                 // Unpacked field accessors
                 for (field_name, ty) in fields {
@@ -1005,13 +1005,13 @@ impl GpuTypeDef {
                             "{} {}_{}(const device char *buf, {} ref) {{\n",
                             tn, name, field_name, rn
                         )
-                        .unwrap();
+                            .unwrap();
                         write!(
                             r,
                             "    return ((const device {}Packed *)(buf + ref))->{};\n",
                             name, field_name
                         )
-                        .unwrap();
+                            .unwrap();
                         write!(r, "}}\n").unwrap();
                     }
                 }
@@ -1029,13 +1029,13 @@ impl GpuTypeDef {
                     "uint {}_tag(const device char *buf, {} ref) {{\n",
                     en.name, rn
                 )
-                .unwrap();
+                    .unwrap();
                 write!(
                     r,
                     "    return ((const device {} *)(buf + ref))->tag;\n",
                     en.name
                 )
-                .unwrap();
+                    .unwrap();
                 write!(r, "}}\n").unwrap();
                 // TODO: current code base is 1-based, but we could switch to 0
                 let mut tag = 1;
@@ -1064,7 +1064,6 @@ impl GpuTypeDef {
                 write!(r, "    uint tag;\n").unwrap();
 
                 let size = self.size(module);
-                println!("size: {}", size);
                 // TODO: this sometimes predicts incorrect number of u32s needed to store body (differences with metal alignment)
                 let body_size = ((size + 3) >> 2) - 1;
 
@@ -1075,31 +1074,29 @@ impl GpuTypeDef {
                     "inline uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
                     en.name, rn
                 )
-                .unwrap();
+                    .unwrap();
 
                 write!(r, "    uint result = buf.Load(ref);\n    return result;\n").unwrap();
                 write!(r, "}}\n\n").unwrap();
 
                 let quotient_in_u32x4 = size / (4 * GpuScalar::U32.size());
-                let quotient_in_bytes = quotient_in_u32x4 * 16;
-                let remainder_in_u32s = (size - quotient_in_bytes)/4;
-
+                let remainder_in_u32s = size - quotient_in_u32x4 * 4;
                 write!(r, "{}", "inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {\n").unwrap();
                 for i in 0..quotient_in_u32x4 {
                     write!(
                         r,
                         "    uint4 group{} = src.Load4({});\n",
                         i,
-                        simplified_add("src_ref", i * 16)
+                        simplified_add("src_ref", i * 4)
                     )
-                    .unwrap();
+                        .unwrap();
                     write!(
                         r,
                         "    dst.Store4({}, group{});\n",
-                        simplified_add("dst_ref", i * 16),
+                        simplified_add("dst_ref", i * 4),
                         i,
                     )
-                    .unwrap();
+                        .unwrap();
                 }
                 match remainder_in_u32s {
                     1 | 2 | 3 => {
@@ -1109,17 +1106,16 @@ impl GpuTypeDef {
                             remainder_in_u32s,
                             quotient_in_u32x4,
                             remainder_in_u32s,
-                            simplified_add("src_ref", quotient_in_u32x4 * 16)
+                            simplified_add("src_ref", quotient_in_u32x4 * 4)
                         )
-                        .unwrap();
+                            .unwrap();
                         write!(
                             r,
-                            "    dst.Store{}({}, group{});\n",
+                            "    dst.Store{}({});\n",
                             remainder_in_u32s,
-                            simplified_add("dst_ref", quotient_in_u32x4 * 16),
-                            quotient_in_u32x4,
+                            simplified_add("dst_ref", quotient_in_u32x4 * 4)
                         )
-                        .unwrap();
+                            .unwrap();
                     }
                     _ => {}
                 }
@@ -1201,7 +1197,7 @@ impl GpuModule {
                     to_snake_case(name).to_uppercase(),
                     def.size(self)
                 )
-                .unwrap();
+                    .unwrap();
             }
             if let GpuTypeDef::Enum(en) = def {
                 let mut tag: usize = 0;
@@ -1221,9 +1217,9 @@ struct Items(Vec<syn::Item>);
 
 fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
     if let syn::Type::Path(TypePath {
-        path: syn::Path { segments, .. },
-        ..
-    }) = ty
+                               path: syn::Path { segments, .. },
+                               ..
+                           }) = ty
     {
         if segments.len() == 1 {
             let seg = &segments[0];
@@ -1237,9 +1233,9 @@ fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
 
 fn expr_int_lit(e: &Expr) -> Option<usize> {
     if let Expr::Lit(ExprLit {
-        lit: Lit::Int(lit_int),
-        ..
-    }) = e
+                         lit: Lit::Int(lit_int),
+                         ..
+                     }) = e
     {
         lit_int.base10_parse().ok()
     } else {
