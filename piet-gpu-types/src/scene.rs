@@ -28,9 +28,17 @@ piet_gpu! {
             color: SRGBColor,
         }
 
+        struct PietGroup {
+            n: u32,
+            first: u32,
+            in_group_offset: [f32; 2],
+            scene_bbox: BBox,
+        }
+
         enum PietItem {
             Circle(PietCircle),
             Glyph(PietGlyph),
+            Group(PietGroup),
         }
     }
 }
