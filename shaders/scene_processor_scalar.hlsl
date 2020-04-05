@@ -36,7 +36,7 @@ void scene_processor(uint3 DTid : SV_DispatchThreadID) {
     uint in_group_ix = 0;
     while (true) {
         if (in_group_ix < grp.n) {
-            uint item_ref = in_group_ix + grp_desc.first;
+            uint item_ref = in_group_ix + grp.first;
             bool hit = false;
             bool is_group = false;
 
@@ -62,7 +62,7 @@ void scene_processor(uint3 DTid : SV_DispatchThreadID) {
                 }
                 PietGroupPacked p_new_grp = PietGroup_read(item_data, item_ref);
                 PietGroup new_grp = PietGroup_unpack(p_new_grp);
-                new_grp.in_group_offset += grp.in_group_offset;
+                new_grp.inner_offset += grp.inner_offset;
                 grp = new_grp;
                 in_group_ix = 0;
             } else {
