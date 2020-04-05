@@ -199,6 +199,10 @@ impl GpuScalar {
         }
     }
 
+    fn cvt_inv(self, inner: &str, target: TargetLang) -> String {
+        self.cvt_vec_inv(inner, 1, target)
+    }
+
     fn from_syn(ty: &syn::Type) -> Option<Self> {
         ty_as_single_ident(ty).and_then(|ident| match ident.as_str() {
             "f32" => Some(GpuScalar::F32),
@@ -214,6 +218,7 @@ impl GpuScalar {
 
     fn gen_derive(&self) -> proc_macro2::TokenStream {
         match self {
+            GpuScalar::F16 => quote!(f16),
             GpuScalar::F32 => quote!(f32),
             GpuScalar::I8 => quote!(i8),
             GpuScalar::I16 => quote!(i16),
@@ -283,7 +288,7 @@ fn generate_scalar_extractor(ty: GpuScalar, target: TargetLang) -> String {
         ty_name, size_in_bits
     )
     .unwrap();
-    write!(extractor, "uint raw = (package >> bit_shift) & {};", mask).unwrap();
+    write!(extractor, "uint raw = (package >> bit_shift) & {};\n", mask).unwrap();
     write!(
         extractor,
         "    {} result = {};\n\n    return result;\n}\n\n",
@@ -303,6 +308,42 @@ fn generate_scalar_extractors(scalars: Vec<GpuScalar>, target: TargetLang) -> St
     }
 
     extractors
+}
+
+fn generate_scalar_inserter(ty: GpuScalar, target: TargetLang) -> String {
+    let size_in_bits = ty.size() * 4;
+    let mut inserter: String = String::new();
+
+    let mask: usize = 2_usize.pow(size_in_bits) - 1;
+    let ty_name = ty.typename(target);
+
+    write!(
+        inserter,
+        "inline uint insert_{}bit_value({} value, uint bit_shift, uint package) {{\n",
+        size_in_bits, ty_name,
+    )
+    .unwrap();
+    write!(
+        inserter,
+        "    uint mask = ~((4294967295 >> {}) << bit_shift);\n",
+        size_in_bits
+    )
+    .unwrap();
+    write!(
+        inserter,
+        "{}",
+        "    uint raw = ty.cvt_inv("value", target);\n",
+    )
+    .unwrap();
+    write!(
+        inserter,
+        "    uint result = (package & mask) | (raw << bit_shift);\n\n",
+        mask,
+    )
+    .unwrap();
+    write!(extractor, "{}", "    return result;\n}\n\n",).unwrap();
+
+    extractor
 }
 
 /// A `PackedField` stores `StoredField`s
@@ -959,6 +1000,64 @@ impl SpecifiedStruct {
                 write!(
                     r,
                     "    result.{} = packed_form.{};\n",
+                    field_name, packed_field.name
+                )
+                .unwrap();
+            }
+        }
+        write!(r, "{}", "\n    return result;\n}\n\n").unwrap();
+        r
+    }
+
+    fn generate_packer(&self) -> String {
+        let mut r = String::new();
+
+        write!(
+            r,
+            "inline {} {}_pack({} unpacked_form) {{\n",
+            self.packed_form.name, self.name, self.name,
+        )
+        .unwrap();
+
+        write!(r, "    {} result;\n\n", self.packed_form.name).unwrap();
+        for (field_name, field_type) in self.fields.iter() {
+            let packed_field = self
+                .packed_form
+                .packed_fields
+                .iter()
+                .find(|&pf| {
+                    pf.stored_fields
+                        .iter()
+                        .find(|&sf| sf.name == field_name.as_str())
+                        .is_some()
+                })
+                .expect(&format!(
+                    "no packed field stores {} in {}Packed",
+                    field_name, self.name
+                ));
+            if packed_field.is_packed(true) {
+                match field_type {
+                    GpuType::InlineStruct(name) => {
+                        write!(
+                            r,
+                            "    result.{} = {}_pack(unpacked_form.{});\n",
+                            field_name, name, packed_field.name
+                        )
+                        .unwrap();
+                    }
+                    _ => {
+                        write!(
+                            r,
+                            "    result.{} = {}_pack_{}(unpacked_form.{});\n",
+                            packed_field.name, self.name, field_name, field_name,
+                        )
+                        .unwrap();
+                    }
+                }
+            } else {
+                write!(
+                    r,
+                    "    result.{} = unpacked_form.{};\n",
                     field_name, packed_field.name
                 )
                 .unwrap();
