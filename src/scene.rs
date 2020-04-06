@@ -15,7 +15,7 @@ use kurbo::{Circle, Rect, Shape};
 use std::convert::TryFrom;
 
 use piet_gpu_types::encoder::{Encode, Encoder};
-use piet_gpu_types::scene::{BBox, SRGBColor, PietCircle, PietGlyph, PietItem};
+use piet_gpu_types::scene::{BBox, PietCircle, PietGlyph, PietItem, SRGBColor};
 
 fn rect_to_bbox(bbox: &Rect) -> BBox {
     // TODO: should more attention be paid to f64 to u16 conversion?
@@ -70,12 +70,7 @@ impl Scene {
         self.num_items += 1;
     }
 
-    pub fn append_glyph(
-        &mut self,
-        scene_bbox: Rect,
-        atlas_bbox: Rect,
-        color: [u8; 4],
-    ) {
+    pub fn append_glyph(&mut self, scene_bbox: Rect, atlas_bbox: Rect, color: [u8; 4]) {
         let scene_bbox = rect_to_bbox(&scene_bbox);
         scene_bbox.encode(&mut self.item_bboxes);
 
@@ -106,11 +101,7 @@ impl Scene {
             };
             // println!("scene | x0: {}, x1: {}, y0: {}, y1: {}", scene_bbox.x0, scene_bbox.x1, scene_bbox.y0, scene_bbox.y1);
             // println!("atlas | x0: {}, x1: {}, y0: {}, y1: {}", pg.atlas_bbox.x0, pg.atlas_bbox.x1, pg.atlas_bbox.y0, pg.atlas_bbox.y1);
-            self.append_glyph(
-                scene_bbox,
-                pg.atlas_bbox,
-                color,
-            );
+            self.append_glyph(scene_bbox, pg.atlas_bbox, color);
         }
     }
 }

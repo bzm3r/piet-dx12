@@ -19,6 +19,8 @@ use syn::{
     PathArguments, TypeArray, TypePath,
 };
 
+use std::convert::TryInto;
+
 /// The target shader language. We can't make this a public type because of Rust rules.
 #[derive(Copy, Clone, PartialEq)]
 enum TargetLang {
@@ -133,6 +135,7 @@ impl GpuScalar {
             TargetLang::Hlsl => match self {
                 GpuScalar::I8 | GpuScalar::I16 => GpuScalar::I32,
                 GpuScalar::U8 | GpuScalar::U16 => GpuScalar::U32,
+                GpuScalar::F16 => GpuScalar::F32,
                 _ => self,
             },
             _ => self,
@@ -275,75 +278,92 @@ fn size_in_uints(num_bytes: usize) -> usize {
     (num_bytes + 3) / 4
 }
 
-fn generate_scalar_extractor(ty: GpuScalar, target: TargetLang) -> String {
-    let size_in_bits = ty.size() * 4;
+fn gen_extractor(ty: GpuScalar, target: TargetLang) -> String {
+    let size_in_bits: u32 = (ty.size() * 8)
+        .try_into()
+        .expect("could not convert type size to u32");
     let mut extractor: String = String::new();
 
-    let mask: usize = 2_usize.pow(size_in_bits) - 1;
-    let ty_name = ty.typename(target);
+    if size_in_bits < 32 {
+        let unpacked_ty_name = ty.unpacked_type(target).typename(target);
 
-    write!(
-        extractor,
-        "inline {} extract_{}bit_value(uint bit_shift, uint package) {{\n",
-        ty_name, size_in_bits
-    )
-    .unwrap();
-    write!(extractor, "uint raw = (package >> bit_shift) & {};\n", mask).unwrap();
-    write!(
-        extractor,
-        "    {} result = {};\n\n    return result;\n}\n\n",
-        ty_name,
-        ty.cvt("raw", target),
-    )
-    .unwrap();
+        write!(
+            extractor,
+            "inline {} extract_{}_value(uint bit_shift, uint package) {{\n",
+            unpacked_ty_name, ty,
+        )
+        .unwrap();
 
-    extractor
-}
+        let mask: usize = 2_usize.pow(size_in_bits) - 1;
+        let unpacked_ty_name = ty.unpacked_type(target).typename(target);
 
-fn generate_scalar_extractors(scalars: Vec<GpuScalar>, target: TargetLang) -> String {
-    let mut extractors: String = String::new();
-
-    for scalar in scalars.into_iter() {
-        write!(extractors, "{}", generate_scalar_extractor(scalar, target)).unwrap();
+        write!(
+            extractor,
+            "    uint raw = (package >> bit_shift) & {};\n",
+            mask
+        )
+        .unwrap();
+        write!(
+            extractor,
+            "    {} result = {};\n\n    return result;\n}}\n\n",
+            unpacked_ty_name,
+            ty.cvt("raw", target),
+        )
+        .unwrap();
     }
 
-    extractors
+    extractor
 }
 
-fn generate_scalar_inserter(ty: GpuScalar, target: TargetLang) -> String {
-    let size_in_bits = ty.size() * 4;
+fn gen_inserter(ty: GpuScalar, target: TargetLang) -> String {
+    let size_in_bits: u32 = (ty.size() * 8)
+        .try_into()
+        .expect("could not convert type size to u32");
     let mut inserter: String = String::new();
 
-    let mask: usize = 2_usize.pow(size_in_bits) - 1;
-    let ty_name = ty.typename(target);
+    if size_in_bits < 32 {
+        let mask: usize = 2_usize.pow(size_in_bits) - 1;
+        let unpacked_ty_name = ty.unpacked_type(target).typename(target);
 
-    write!(
-        inserter,
-        "inline uint insert_{}bit_value({} value, uint bit_shift, uint package) {{\n",
-        size_in_bits, ty_name,
-    )
-    .unwrap();
-    write!(
-        inserter,
-        "    uint mask = ~((4294967295 >> {}) << bit_shift);\n",
-        size_in_bits
-    )
-    .unwrap();
-    write!(
-        inserter,
-        "{}",
-        "    uint raw = ty.cvt_inv("value", target);\n",
-    )
-    .unwrap();
-    write!(
-        inserter,
-        "    uint result = (package & mask) | (raw << bit_shift);\n\n",
-        mask,
-    )
-    .unwrap();
-    write!(extractor, "{}", "    return result;\n}\n\n",).unwrap();
+        write!(
+            inserter,
+            "inline uint insert_{}_value({} value, uint bit_shift, uint package) {{\n",
+            ty, unpacked_ty_name,
+        )
+        .unwrap();
+        write!(
+            inserter,
+            "    uint mask = ~((4294967295 >> {}) << bit_shift);\n",
+            size_in_bits
+        )
+        .unwrap();
+        write!(
+            inserter,
+            "    uint raw = {};\n",
+            ty.cvt_inv("value", target)
+        )
+        .unwrap();
+        write!(
+            inserter,
+            "    uint result = (package & {}) | (raw << bit_shift);\n\n",
+            mask,
+        )
+        .unwrap();
+        write!(inserter, "{}", "    return result;\n}\n\n",).unwrap();
+    }
 
-    extractor
+    inserter
+}
+
+fn gen_extractors_and_inserters(scalar_types: Vec<GpuScalar>, target: TargetLang) -> String {
+    let mut r: String = String::new();
+
+    for ty in scalar_types.into_iter() {
+        write!(r, "{}", gen_extractor(ty, target)).unwrap();
+        write!(r, "{}", gen_inserter(ty, target)).unwrap();
+    }
+
+    r
 }
 
 /// A `PackedField` stores `StoredField`s
@@ -353,6 +373,7 @@ struct StoredField {
     ty: GpuType,
     /// The offset of the field within the packed field, in bits.
     offset: usize,
+    size: u32,
 }
 
 /// A `PackedStruct` has `PackedField`s
@@ -387,7 +408,7 @@ struct SpecifiedStruct {
 }
 
 impl StoredField {
-    fn generate_unpacker(
+    fn gen_unpacker(
         &self,
         packed_struct_name: &str,
         packed_field_name: &str,
@@ -417,8 +438,8 @@ impl StoredField {
 
                     write!(
                         unpacker,
-                        "    result = extract_{}bit_value({}, {});\n",
-                        size_in_bits, self.offset, packed_field_name
+                        "    result = extract_{}_value({}, {});\n",
+                        scalar, self.offset, packed_field_name
                     )
                     .unwrap();
                 }
@@ -447,8 +468,8 @@ impl StoredField {
                         };
                         let extracted = scalar.cvt(
                             &format!(
-                                "extract_{}bit_value({}, {}{})",
-                                scalar_size_in_bits,
+                                "extract_{}_value({}, {}{})",
+                                scalar,
                                 self.offset + (i * scalar_size_in_bits) % 32,
                                 packed_field_name,
                                 subscript
@@ -497,6 +518,9 @@ impl PackedField {
                         name: field_name.into(),
                         ty: field_type.clone(),
                         offset: 0,
+                        size: field_size
+                            .try_into()
+                            .expect("could not convert type size to u32"),
                     });
                     self.close(module).unwrap();
                     Ok(PackResult::SuccessAndClosed)
@@ -509,6 +533,9 @@ impl PackedField {
                     name: String::from(field_name),
                     ty: field_type.clone(),
                     offset: self.size * 8,
+                    size: field_size
+                        .try_into()
+                        .expect("could not convert type size to u32"),
                 });
                 self.size += field_size;
                 Ok(PackResult::SuccessAndOpen)
@@ -569,7 +596,7 @@ impl PackedField {
         }
     }
 
-    fn generate_reader(&self, current_offset: usize, target: TargetLang) -> Result<String, String> {
+    fn gen_reader(&self, current_offset: usize, target: TargetLang) -> Result<String, String> {
         if let Some(ty) = &self.ty {
             let type_name = ty.unpacked_typename(target);
             let packed_field_name = &self.name;
@@ -620,11 +647,11 @@ impl PackedField {
                 }
             }
         } else {
-            Err("cannot generate field reader from an open packed field".into())
+            Err("cannot gen field reader from an open packed field".into())
         }
     }
 
-    fn generate_field_writer(&self, offset: usize, target: TargetLang) -> String {
+    fn gen_field_writer(&self, offset: usize, target: TargetLang) -> String {
         let ty = self.ty.as_ref().unwrap();
         match ty {
             GpuType::Scalar(scalar) => {
@@ -654,7 +681,7 @@ impl PackedField {
         }
     }
 
-    fn generate_accessor(
+    fn gen_accessor(
         &self,
         packed_struct_name: &str,
         ref_type: &str,
@@ -695,18 +722,18 @@ impl PackedField {
 
             Ok(field_accessor)
         } else {
-            Err("cannot generate field accessor from open packed field".into())
+            Err("cannot gen field accessor from open packed field".into())
         }
     }
 
-    fn generate_unpackers(&self, packed_struct_name: &str, target: TargetLang) -> String {
+    fn gen_unpackers(&self, packed_struct_name: &str, target: TargetLang) -> String {
         let mut unpackers = String::new();
 
         for sf in &self.stored_fields {
             write!(
                 unpackers,
                 "{}",
-                sf.generate_unpacker(packed_struct_name, &self.name, target)
+                sf.gen_unpacker(packed_struct_name, &self.name, target)
             )
             .unwrap();
         }
@@ -714,8 +741,137 @@ impl PackedField {
         unpackers
     }
 
-    fn generate_packer(&self, target: TargetLang) -> String {
-        format!("// packer for {}\n", self.name)
+    fn gen_packers(&self, unpacked_struct_name: &str, target: TargetLang) -> String {
+        let packed_ty = if self.is_closed() {
+            self.ty
+                .as_ref()
+                .expect("packed type has not been assigned a type!")
+        } else {
+            panic!("cannot generate packers for unclosed packed field");
+        };
+        let packed_typename = packed_ty.unpacked_typename(target);
+        let mut packers = String::new();
+
+        match &packed_ty {
+            GpuType::Scalar(scalar) => {
+                for sf in self.stored_fields.iter() {
+                    write!(
+                        packers,
+                        "inline {} {}_pack_{}({} {}, {} {}) {{\n",
+                        &packed_typename,
+                        unpacked_struct_name,
+                        sf.name,
+                        sf.ty.unpacked_typename(target),
+                        sf.name,
+                        packed_typename,
+                        self.name,
+                    )
+                    .unwrap();
+                    match &sf.ty {
+                        GpuType::Scalar(sc) => {
+                            write!(
+                                packers,
+                                "    {} = insert_{}_value({}, {}, {});\n\n",
+                                self.name, sc, sf.name, sf.offset, self.name
+                            )
+                            .unwrap();
+                        }
+                        GpuType::Vector(sc, size) => {
+                            let sc_bit_size = sc.size() * 8;
+                            for ix in 0..*size {
+                                write!(
+                                    packers,
+                                    "    {} = insert_{}_value({}[{}], {}, {});\n",
+                                    self.name,
+                                    sc,
+                                    sf.name,
+                                    ix,
+                                    sf.offset + sc_bit_size * ix,
+                                    self.name,
+                                )
+                                .unwrap();
+                            }
+                            write!(packers, "{}", "\n").unwrap();
+                        }
+                        GpuType::InlineStruct(_) => panic!(
+                            "unexpected packing of inline struct into scalar {}!",
+                            packed_typename
+                        ),
+                        GpuType::Ref(_) => {
+                            panic!("unexpected packing of ref into scalar {}!", packed_typename)
+                        }
+                    }
+                    write!(packers, "    return {};\n}}\n\n", self.name).unwrap();
+                }
+            }
+            GpuType::Vector(scalar, _) => {
+                let mut cumulative_size: u32 = 0;
+
+                for sf in self.stored_fields.iter() {
+                    write!(
+                        packers,
+                        "inline {} {}_pack_{}({} {}, {} {}) {{\n",
+                        &packed_typename,
+                        unpacked_struct_name,
+                        sf.name,
+                        sf.ty.unpacked_typename(target),
+                        sf.name,
+                        packed_typename,
+                        self.name
+                    )
+                    .unwrap();
+
+                    let pf_ix = cumulative_size & 31;
+
+                    match &sf.ty {
+                        GpuType::Scalar(_) => {
+                            write!(
+                                packers,
+                                "    {}[{}] = insert_{}_value({}, {}, {}[{}]);\n\n    return r;\n}}",
+                                self.name,
+                                pf_ix,
+                                sf.ty.unpacked_typename(target),
+                                sf.name,
+                                sf.offset,
+                                pf_ix,
+                                self.name,
+                            )
+                            .unwrap();
+                        }
+                        GpuType::Vector(sc, size) => {
+                            let sc_bit_size = sc.size() * 8;
+                            for ix in 0..*size {
+                                write!(
+                                    packers,
+                                    "    {}[{}] = insert_{}_value(sc[{}], {}, {}[{}]);\n",
+                                    self.name,
+                                    pf_ix,
+                                    sc,
+                                    ix,
+                                    sf.offset + ix * sc_bit_size,
+                                    pf_ix,
+                                    self.name,
+                                )
+                                .unwrap();
+                            }
+                            write!(packers, "{}", "\n").unwrap();
+                        }
+                        GpuType::InlineStruct(_) => panic!(
+                            "unexpected packing of inline struct into scalar {}!",
+                            packed_typename
+                        ),
+                        GpuType::Ref(_) => {
+                            panic!("unexpected packing of ref into scalar {}!", packed_typename)
+                        }
+                    }
+                    cumulative_size += sf.size;
+                }
+                write!(packers, "    return {};\n}}\n\n", self.name).unwrap();
+            }
+            _ => panic!("expecting packed field to be u32 or vec of u32s"),
+        }
+
+        packers
     }
 
     fn size(&self, module: &GpuModule) -> Result<usize, String> {
@@ -765,10 +921,11 @@ impl PackedStruct {
         }
     }
 
-    fn generate_functions(&self, module: &GpuModule, target: TargetLang) -> String {
+    fn gen_functions(&self, module: &GpuModule, target: TargetLang) -> String {
         let mut r = String::new();
         let mut field_accessors: Vec<String> = Vec::new();
         let mut unpackers: Vec<String> = Vec::new();
+        let mut packers: Vec<String> = Vec::new();
 
         // This is something of a hack to strip the "Packed" off the struct name
         let stripped_name = &self.name[0..self.name.len() - 6];
@@ -792,16 +949,16 @@ impl PackedStruct {
         }
 
         for packed_field in &self.packed_fields {
-            let reader: String = packed_field
-                .generate_reader(current_offset, target)
-                .unwrap();
+            let reader: String = packed_field.gen_reader(current_offset, target).unwrap();
             let field_accessor: String = packed_field
-                .generate_accessor(stripped_name, &ref_type, &reader, target)
+                .gen_accessor(stripped_name, &ref_type, &reader, target)
                 .unwrap();
 
             field_accessors.push(field_accessor);
+
             if packed_field.is_packed(false) {
-                unpackers.push(packed_field.generate_unpackers(&self.name, target));
+                unpackers.push(packed_field.gen_unpackers(&self.name, target));
+                packers.push(packed_field.gen_packers(&stripped_name, target))
             }
 
             write!(r, "{}", reader).unwrap();
@@ -821,14 +978,81 @@ impl PackedStruct {
             write!(r, "{}", field_accessor).unwrap();
         }
 
-        for unpacker in unpackers {
+        for unpacker in unpackers.iter() {
+            write!(r, "{}", unpacker).unwrap();
+        }
+
+        for packer in packers.iter() {
+            write!(r, "{}", packer).unwrap();
+        }
+
+        r
+    }
+
+    fn gen_readers(&self, module: &GpuModule, target: TargetLang) -> String {
+        let mut r = String::new();
+        let mut field_accessors: Vec<String> = Vec::new();
+        let mut unpackers: Vec<String> = Vec::new();
+        let mut packers: Vec<String> = Vec::new();
+
+        // This is something of a hack to strip the "Packed" off the struct name
+        let stripped_name = &self.name[0..self.name.len() - 6];
+        let ref_type = format!("{}Ref", stripped_name);
+
+        write!(
+            r,
+            "inline {} {}_read({}, {} ref) {{\n",
+            self.name,
+            stripped_name,
+            target.buf_arg(),
+            ref_type,
+        )
+        .unwrap();
+        write!(r, "    {} result;\n\n", self.name).unwrap();
+
+        let mut current_offset: usize = 0;
+        if self.is_enum_variant {
+            // account for tag
+            current_offset = 4;
+        }
+
+        for packed_field in &self.packed_fields {
+            let reader: String = packed_field.gen_reader(current_offset, target).unwrap();
+            let field_accessor: String = packed_field
+                .gen_accessor(stripped_name, &ref_type, &reader, target)
+                .unwrap();
+
+            field_accessors.push(field_accessor);
+            if packed_field.is_packed(false) {
+                unpackers.push(packed_field.gen_unpackers(&self.name, target));
+                packers.push(packed_field.gen_packers(&self.name, target))
+            }
+
+            write!(r, "{}", reader).unwrap();
+            write!(
+                r,
+                "    result.{} = {};\n\n",
+                packed_field.name, packed_field.name
+            )
+            .unwrap();
+
+            current_offset += packed_field.size(module).unwrap();
+        }
+
+        write!(r, "    return result;\n}}\n\n",).unwrap();
+
+        for field_accessor in field_accessors {
+            write!(r, "{}", field_accessor).unwrap();
+        }
+
+        for (unpacker, packer) in unpackers.iter().zip(packers.iter()) {
             write!(r, "{}", unpacker).unwrap();
         }
 
         r
     }
 
-    fn generate_structure_def(&self, target: TargetLang) -> String {
+    fn gen_structure_def(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
         // The packed struct definition (is missing variable sized arrays)
@@ -864,8 +1088,8 @@ impl PackedStruct {
     fn to_shader(&self, module: &GpuModule, target: TargetLang) -> String {
         let mut r = String::new();
 
-        write!(r, "{}", self.generate_structure_def(target)).unwrap();
-        write!(r, "{}", self.generate_functions(module, target)).unwrap();
+        write!(r, "{}", self.gen_structure_def(target)).unwrap();
+        write!(r, "{}", self.gen_functions(module, target)).unwrap();
 
         r
     }
@@ -905,7 +1129,7 @@ impl PackedStruct {
         }
 
         for packed_field in &self.packed_fields {
-            r.push_str(&packed_field.generate_field_writer(current_offset, target));
+            r.push_str(&packed_field.gen_field_writer(current_offset, target));
 
             current_offset += packed_field.size(module).unwrap();
         }
@@ -931,7 +1155,7 @@ impl SpecifiedStruct {
         }
     }
 
-    fn generate_structure_def(&self, target: TargetLang) -> String {
+    fn gen_structure_def(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
         // The unpacked struct definition (is missing variable sized arrays)
@@ -951,7 +1175,7 @@ impl SpecifiedStruct {
         r
     }
 
-    fn generate_unpacker(&self) -> String {
+    fn gen_unpacker(&self) -> String {
         let mut r = String::new();
 
         write!(
@@ -1009,13 +1233,13 @@ impl SpecifiedStruct {
         r
     }
 
-    fn generate_packer(&self) -> String {
+    fn gen_packer(&self) -> String {
         let mut r = String::new();
 
         write!(
             r,
             "inline {} {}_pack({} unpacked_form) {{\n",
-            self.packed_form.name, self.name, self.name,
+            self.name, self.name, self.name,
         )
         .unwrap();
 
@@ -1070,8 +1294,9 @@ impl SpecifiedStruct {
     fn to_shader(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
-        write!(r, "{}", self.generate_structure_def(target)).unwrap();
-        write!(r, "{}", self.generate_unpacker()).unwrap();
+        write!(r, "{}", self.gen_structure_def(target)).unwrap();
+        write!(r, "{}", self.gen_unpacker()).unwrap();
+        write!(r, "{}", self.gen_packer()).unwrap();
 
         r
     }
@@ -1675,7 +1900,7 @@ impl GpuModule {
     fn to_shader(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
-        let scalars = vec![
+        let scalar_tys = vec![
             GpuScalar::F16,
             GpuScalar::F32,
             GpuScalar::I8,
@@ -1686,7 +1911,12 @@ impl GpuModule {
             GpuScalar::U32,
         ];
 
-        write!(&mut r, "{}", generate_scalar_extractors(scalars, target)).unwrap();
+        write!(
+            &mut r,
+            "{}",
+            gen_extractors_and_inserters(scalar_tys, target)
+        )
+        .unwrap();
 
         for def in &self.defs {
             match def {

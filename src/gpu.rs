@@ -13,13 +13,13 @@ use crate::dx12;
 use crate::error;
 use crate::window;
 use kurbo::Rect;
+use piet_gpu_types::encoder::Encode;
+use piet_gpu_types::scene::PietItem;
 use std::convert::TryFrom;
 use std::path::Path;
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgiformat, dxgitype, minwindef, winerror};
 use winapi::um::{d3d12, d3dcommon};
-use piet_gpu_types::scene::PietItem;
-use piet_gpu_types::encoder::Encode;
 
 const FRAME_COUNT: u32 = 2;
 pub type VertexCoordinates = [f32; 3];
@@ -54,9 +54,11 @@ fn materialize_per_tile_command_list_kernel_code(
     shader_template_path: &Path,
     shader_path: &Path,
 ) {
-    let readers = std::fs::read_to_string(readers_path).expect("could not read data from provided readers.hlsl path");
-    let utils = std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
-    
+    let readers = std::fs::read_to_string(readers_path)
+        .expect("could not read data from provided readers.hlsl path");
+    let utils =
+        std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
+
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
 
@@ -64,7 +66,7 @@ fn materialize_per_tile_command_list_kernel_code(
     let step2 = step1.replace("~PTCL_Y~", &format!("{}", ptcl_num_tiles_per_tg_y));
     let step3 = step2.replace("~READERS~", &readers);
     let step4 = step3.replace("~UTILS~", &utils);
-    
+
     std::fs::write(shader_path, step4).expect("could not write to provided shader path");
 }
 
@@ -76,8 +78,10 @@ fn materialize_paint_kernel_code(
     shader_template_path: &Path,
     shader_path: &Path,
 ) {
-    let reader = std::fs::read_to_string(reader_path).expect("could not read data from provided readers.hlsl path");
-    let utils = std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
+    let reader = std::fs::read_to_string(reader_path)
+        .expect("could not read data from provided readers.hlsl path");
+    let utils =
+        std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
 
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not write to provided shader path");
@@ -85,7 +89,7 @@ fn materialize_paint_kernel_code(
     let step2 = step1.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
     let step3 = step2.replace("~READERS~", &reader);
     let step4 = step3.replace("~UTILS~", &utils);
-    
+
     std::fs::write(shader_path, step4).expect("shader template could not be materialized");
 }
 
@@ -474,10 +478,8 @@ impl GpuState {
                 command_queue.clone(),
             );
 
-        let per_tile_command_lists_buffer_size_in_bytes = (PietItem::fixed_size() as u32)
-            * (max_items_scene + 1)
-            * num_tiles_x
-            * num_tiles_y;
+        let per_tile_command_lists_buffer_size_in_bytes =
+            (PietItem::fixed_size() as u32) * (max_items_scene + 1) * num_tiles_x * num_tiles_y;
         let item_bboxes_buffer_size_in_bytes = max_items_scene * 64;
         let items_buffer_size_in_bytes = max_items_scene * (PietItem::fixed_size() as u32);
 
@@ -598,9 +600,7 @@ impl GpuState {
             timing_query_buffer,
             num_renders,
 
-            scene_constants: SceneConstants {
-                num_items_scene: 0,
-            },
+            scene_constants: SceneConstants { num_items_scene: 0 },
 
             _gpu_state_constants: gpu_state_constants,
         };

@@ -399,12 +399,15 @@ fn generate_circle_test() -> Vec<(kurbo::Circle, DX12Brush)> {
     let mut circles = Vec::<(kurbo::Circle, DX12Brush)>::new();
     for i in 0..2 {
         let circle = kurbo::Circle {
-            center: kurbo::Point { x: 100.0 + 50.0*(i as f64), y: 100.0},
+            center: kurbo::Point {
+                x: 100.0 + 50.0 * (i as f64),
+                y: 100.0,
+            },
             radius: 50.0,
         };
         // println!("{}, {}", circle.center.x, circle.center.y);
 
-        let color_u8s: [u8; 4] = [255, 255, 255, (255.0*0.5_f64.powi(i)) as u8];
+        let color_u8s: [u8; 4] = [255, 255, 255, (255.0 * 0.5_f64.powi(i)) as u8];
         // println!("{:?}", color_u8s);
         let brush = DX12Brush::Solid(ColorValue {
             color_u32: 0,
@@ -486,7 +489,6 @@ fn generate_random_text(
 
     random_text
 }
-
 
 #[allow(dead_code)]
 fn generate_test_text() -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
@@ -570,11 +572,16 @@ fn populate_render_context(
 
 fn main() {
     {
-        let gpu_side_code: String = piet_gpu_types::scene::gen_gpu_scene("HLSL");
+        let gpu_scene_infra: String = piet_gpu_types::scene::gen_gpu_scene("HLSL");
+        let gpu_ptcl_infra: String = piet_gpu_types::ptcl::gen_gpu_ptcl("HLSL");
+        println!("{}", gpu_scene_infra);
+        panic!("caught a fish!");
+
         let shader_folder = Path::new("shaders");
         let readers_fp = shader_folder.join(Path::new("readers.hlsl"));
         let mut f = File::create(readers_fp).unwrap();
-        f.write_all(gpu_side_code.as_bytes()).unwrap();
+        f.write_all(gpu_scene_infra.as_bytes()).unwrap();
+        f.write_all(gpu_ptcl_infra.as_bytes()).unwrap();
         f.sync_all().unwrap();
     }
 
